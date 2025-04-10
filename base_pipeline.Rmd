@@ -1,0 +1,390 @@
+---
+title: "ncte_base_df_pipeline"
+author: "Mike Hardy"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# setup
+
+
+```{r libraries, warning=FALSE, message=FALSE}
+
+# library(ISLR2)
+library(MASS)
+library(gbm)
+library(BART)
+library(glmnet)
+library(randomForest)
+library(ggplot2)
+library(tidyverse)
+library(easystats)
+library(stargazer)
+library(ggExtra)
+library(psych)
+library(car)
+library(janitor)
+library(skimr)
+library(gtsummary)
+library(ggthemes)
+library(ggridges)
+library(scales)
+library(modelsummary)
+library(mirt)
+library(lmtest)
+library(sandwich)
+library(grf)
+library(glmnet)
+library(splines)
+library(reshape2)
+library(RColorBrewer); library(colorspace)
+library(norm)
+library(ppcor)
+library(jsonlite)
+# library(VIM)
+library(naniar)
+# library("devtools")
+library(skimr)
+library(mltools)
+library(lme4)
+library(gtheory)
+library(R2jags); library(ggmcmc); library(ggplot2)
+library(here)
+library(extraDistr)
+library(sirt)
+library(immer)
+library(boot)
+library(mokken)
+library(csranks)
+
+
+```
+
+## NCTE Data files
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+
+```{r load_data}
+
+# DS0 Study-Level Files	21 MB	
+# DS1 Class Observations	4 MB	
+# DS2 Mathematical Quality of Instruction	35 MB	
+# DS3 Student Questionnaire	17 MB	
+# DS4 Value Added Scores	3 MB	
+# DS5 Student Administrative Data	39 MB	
+# DS6 Teacher Background Questionnaire	2 MB	
+# DS7 Teacher Fall Questionnaire	6 MB	
+# DS8 Teacher Spring Questionnaire	7 MB	
+# DS9 Student Test Responses	38 MB	
+# DS10 Student Random Assignment Roster	2 MB	
+load("~/OneDrive - Stanford/Projects/ncte/data/DS0001/36095-0001-Data.rda",)
+load("~/OneDrive - Stanford/Projects/ncte/data/DS0002/36095-0002-Data.rda",)
+load("~/OneDrive - Stanford/Projects/ncte/data/DS0003/36095-0003-Data.rda",)
+load("~/OneDrive - Stanford/Projects/ncte/data/DS0004/36095-0004-Data.rda",)
+load("~/OneDrive - Stanford/Projects/ncte/data/DS0005/36095-0005-Data.rda",)
+load("~/OneDrive - Stanford/Projects/ncte/data/DS0006/36095-0006-Data.rda",)
+load("~/OneDrive - Stanford/Projects/ncte/data/DS0007/36095-0007-Data.rda",)
+load("~/OneDrive - Stanford/Projects/ncte/data/DS0008/36095-0008-Data.rda",)
+
+df1 <- da36095.0001  |> as_tibble()
+df2 <- da36095.0002  |> as_tibble()
+df3 <- da36095.0003  |> as_tibble()
+df4 <- da36095.0004  |> as_tibble()
+df5 <- da36095.0005  |> as_tibble()
+df6 <- da36095.0006  |> as_tibble()
+df7 <- da36095.0007  |> as_tibble()
+df8 <- da36095.0008  |> as_tibble()
+load("~/OneDrive - Stanford/Projects/ncte/data/DS0009/36095-0009-Data.rda",)
+df9 <- da36095.0009  |> as_tibble()
+
+factor_base_vas <- c("DISTRICT","NCTETID","OBSID","RATERID")
+
+
+CLASS_items <- names(df1|> select("CLPC":"CLSTENG"))
+MQI_items <- df2 |> select(LINK:MLANG,REMED:USEPROD,MAJERR:LCP,STEXPL:ETCA) |> names()
+MQI_ch_summaries <- df2 |> select(OWWS,OERR,OSPMMR,ORICH,OWWS4,OERR4,OSPMMR4,ORICH4,STUCON,STUCOM,MMSM) |> names()
+all_MQI <- df2 |> select(FORMAT_ACTIVE:WORLD) |> names()
+items_bias <- c("MLANG","LCP","ETCA")
+negative_items <-c("LCP","MAJERR","LANGIMP")
+neg_class_items <- c("CLNC")
+neg_mqi_items <-c("LCP","MAJERR","LANGIMP")
+mqi.summary.items <- c("MQI3","MQI5","MKT3","MKT5")
+whole.obs.mqi <- df2 |> select(LLC:TASKDEVMAT) |> names()
+whole.obs.activity.mqi <- df2 |> select(ORIENT:DIFFINST,ERRANN:WORLD,) |> names()
+all_neg_items <- c(negative_items,neg_class_items)
+mqi_format <- c("FORMAT_ACTIVE","FORMAT_BOTH","FORMAT_SMALLGRP", "DIRINST","APLPROB","CWCM","SMALDIS")
+all_items <- c(MQI_items,CLASS_items)
+all_obs_items <- c(MQI_items,CLASS_items,mqi_format,whole.obs.mqi,mqi.summary.items,whole.obs.activity.mqi,MQI_ch_summaries)
+## Four dimensions from Hill et al 2012 (validating arguments) for 4 factors
+RICH <- c("LINK","EXPL","MMETH","MLANG","MGEN","ORICH","ORICH4") #s
+WWS <- c("REMED","USEPROD","OWWS","OWWS4","MATCON")
+SPMMR <- c("ETCA","STEXPL","SMQR","OSPMMR", "OSPMMR4")
+ERRORS <- c("LANGIMP","MAJERR","LCP","OERR","OERR4")
+
+## Three dimensions from Hill et al 2008? and appendix dimension study
+RICH.3 <- c("LINK","EXPL","MMETH","MLANG","MGEN","REMED","ORICH","ORICH4") #s
+# WWS.3 <- c("REMED",)
+SPMMR.3 <- c("ETCA","STEXPL","SMQR","USEPROD","OSPMMR", "OSPMMR4","MATCON")
+ERRORS.3 <- c("LANGIMP","MAJERR","LCP","OERR","OERR4")
+
+
+
+onlyyr3 <- df2 |> select(TSTUDEA:WORLD,STUCON:MMSM) |> names()
+notyr3 <- df2 |> select(FORMAT_ACTIVE:DIRINST,APLPROB,ORICH,OWWS,OERR,OSPMMR,ORIENT:MKT3) |> names()
+onlyyr2 <- c("LLC")
+### Factors from Blazar et al attending to general dimensions (2 dimensions MQI, 2 CLASS)
+ERRORS
+AMBIMATH <- c(RICH,WWS,SPMMR)
+factor1_cl_culture <- c("CLPC","CLBM","CLPRDT")
+
+
+# Function for getting factors
+get_factor <- function(item){
+  ifelse(item %in% MQI_items,
+         ifelse(item %in% negative_items, 4, 3),
+         ifelse(item %in% CLASS_items,
+                ifelse(item %in% factor1_cl_culture, 1, 2),
+                NA))
+}
+get_mqi_domain <- function(item){
+  ifelse(item %in% RICH, "RICH",
+         ifelse(item %in% WWS, "WWS",
+                ifelse(item %in% SPMMR, "SPMMR",
+                       ifelse(item %in% ERRORS, "ERRORS",
+                              NA))))
+}
+
+
+orange_ <- hex(LAB(62.69,41.20,62.36,names="orange_"))
+yellow_ <- hex(LAB(71.92,-13.78,64.57, names= "yellow_"))
+
+# function(orange_,yellow_){
+#   scale_fill_gradientn(colours = c(orange_,yellow_),
+#                         values = scales::rescale(c(0,1)),
+#                         breaks = c(0,1),
+#                         labels = c("Low","High"),
+#                         name = "MQI Score")
+# }
+
+robos_to_remove_for_stability <- c(101,104,106,108)
+first.study.list <- c(102,103,105,134,167)
+first.study.list2 = first.study.list[-3]
+
+GPT_items = c("EXPL", "REMED", "LANGIMP", "SMQR", "CLPC", "CLBM", "CLINSTD")
+
+```
+
+### School and Class variables
+
+```{r}
+## Getting student composition data
+classes <- df5 |> 
+  group_by(NCTETID,SCHOOLYEAR_SP) |> 
+  summarise(across(c("V_CCLASS_SIZE","V_CS_ALT_IRT_M_TM1",
+                     "V_CS_STATE_STD_M_TM1","V_CS_STATE_STD_E_TM1",
+                     "V_CS_FRPL","V_CS_AFAM","V_CS_LEP",
+                     "V_CS_HISP","V_CS_WHITE","V_CS_SPED"),first)) |> 
+  ungroup() |> 
+  # drop_na() |> 
+  mutate(id_year = str_c(as.character(NCTETID),
+                                      "_",
+                                      as.character(SCHOOLYEAR_SP-2000))) 
+## Teacher Data
+teachers <- df6 |> mutate_all(as.numeric) |> 
+  mutate(across("HISP":"MALE", ~.-1)) %>% 
+  mutate(RACE.ETH = case_when(
+    HISP + BLACK + ASIAN + AMINDIAN + MULTIRACIAL + RACEOTHER > 1 ~ "MULTIOTHER",
+    HISP == 1 ~ "HISP",
+    BLACK == 1 ~ "BLACK",
+    ASIAN == 1 ~ "ASIAN",
+    WHITE == 1 ~ "WHITE",
+    # MULTIRACIAL == 1 ~ "MULTIOTHER",
+    # RACEOTHER == 1 ~ "MULTIOTHER",
+    T ~ "UNK")) |> 
+  select(NCTETID,RACE.ETH,SURVEYYEAR_SP,EXPERIENCE,MALE) %>% 
+  ungroup() %>% 
+  full_join(df1 %>% 
+          select(NCTETID,DISTRICT) %>% 
+          distinct(), by = "NCTETID") %>% 
+  mutate_all(as_factor) |> 
+  as_tibble() 
+
+
+
+
+df2 <- df2 %>%
+  mutate(id_year = str_c(as.character(NCTETID),"_",as.character(SCHOOLYEAR_SP-2000)))
+df1 <- df1 %>% 
+  mutate(id_year = str_c(as.character(NCTETID),"_",as.character(SCHOOLYEAR_SP-2000))) 
+
+
+```
+
+### Teacher Variables
+
+```{r}
+
+n_mqi_raters <- df2 |> distinct(RATERID) |> nrow()
+n_class_raters <- df1 |> distinct(RATERID) |> nrow()
+rdf_ratings = bind_rows(df2 %>% 
+                          mutate(CHAPNUM = as_factor(as.numeric(CHAPNUM))) |> 
+                          select(-c(MQI_11:MQI_13))|> 
+                    mutate(across(c("SEGMENT","FORMAT_ACTIVE":"WORLD"),
+                                  as.numeric)) |>  
+                    mutate(USEPROD = ifelse(SCHOOLYEAR_SP == 2013,
+                                            if_else(MATCON -1 == 0, 1, MATCON -1),USEPROD),
+                           OWWS = ifelse(is.na(OWWS),
+                                            if_else(OWWS4 -1 == 0, 1, OWWS4 -1),OWWS),
+                           OERR = ifelse(is.na(OERR),
+                                            if_else(OERR4 -1 == 0, 1, OERR4 -1),OERR),
+                           ORICH = ifelse(is.na(ORICH),
+                                            if_else(ORICH4 -1 == 0, 1, ORICH4 -1),ORICH),
+                           OSPMMR = ifelse(is.na(OSPMMR),
+                                            if_else(OSPMMR4 -1 == 0, 1, OSPMMR4 -1),OSPMMR),
+                           across(MAJERR:OERR,~ 4-.),
+                           across(OERR4,~5-.)
+    ) |> pivot_longer(cols = c("FORMAT_ACTIVE":"WORLD"),
+                 names_to = "ITEM",values_to = "SCORE")
+    ,
+    # pivot_longer(cols = c("FORMAT_ACTIVE":"WORLD","CLPC":"CLSTENG"),
+    #              names_to = "ITEM",values_to = "SCORE"),
+          bind_rows(df1 %>% mutate(CHAPNUM = as_factor(as.numeric(CHAPNUM) *2 - 1)),
+                    df1 %>% mutate(CHAPNUM = as_factor(as.numeric(CHAPNUM) *2))) |>
+      mutate(across(c("CLPC":"CLSTENG"),as.numeric), SEGMENT = 2,
+             RATERID = RATERID + n_mqi_raters) |> 
+      select(-c(CLASS_11:CLASS_13)) |> 
+      pivot_longer(cols = c("CLPC":"CLSTENG"),
+                 names_to = "ITEM",values_to = "SCORE") 
+          #   ,
+          # by = c("NCTETID","DISTRICT","OBSID","CHAPNUM","id_year",
+          #        "SCHOOLYEAR_SP","OBSYEAR","OBSMONTH","OBSDAY"), 
+          # suffix = c("_MQI","_CLS")
+    )
+
+
+## Get VAM and then avg VAM for the teachers in years 
+## where they don't have a year VAM, to create the ratings table: rdf
+# rdf = ratings dataframe
+STA.yr.df <- df4 |> 
+  select(NCTETID,starts_with("STATEVA_M")) |> 
+  pivot_longer(cols = starts_with("STATEVA_M"),
+               names_to = c("YR","SE"),
+               values_to = "STA.yr",
+               names_pattern = "STATEVA_M(\\d{1,2})_?(.*)") |> 
+  mutate(id_year = str_c(as.character(NCTETID),"_",as.character(as.numeric(YR)))) |> 
+  drop_na() |> 
+  pivot_wider(names_from = SE,values_from = STA.yr,names_prefix = "STA") |> 
+  rename("STA.yr" = "STA","STAse.yr"="STASE") |> 
+  select(-YR)
+
+ALT.yr.df <- df4 |> 
+  select(NCTETID,starts_with("ALTVA")) |> 
+  pivot_longer(cols = starts_with("ALTVA"),
+               names_to = c("YR","SE"),
+               values_to = "ALT.yr",
+               names_pattern = "ALTVA(\\d{1,2})_?(.*)") |> 
+  mutate(id_year = str_c(as.character(NCTETID),"_",as.character(as.numeric(YR)))) |> 
+  drop_na() |> 
+  pivot_wider(names_from = SE,values_from = ALT.yr,names_prefix = "ALT") |> 
+  rename("ALT.yr" = "ALT","ALTse.yr"="ALTSE") |> 
+  select(-YR)
+
+
+
+rdf <- rdf_ratings |> 
+    left_join(df4 |> select(NCTETID,STATEVA_M,STATEVA_M_SE,ALTVA,ALTVA_SE), 
+              by = "NCTETID") |> 
+    rename("STA"="STATEVA_M",
+           "STAse"= "STATEVA_M_SE", 
+           "ALT"="ALTVA",
+           "ALTse" =  "ALTVA_SE") |> 
+  left_join(STA.yr.df |> select(-NCTETID),by = "id_year") |>
+  left_join(ALT.yr.df |> select(-NCTETID),by = "id_year") |> 
+  mutate(STA.yr = if_else(is.na(STA.yr),STA,STA.yr),
+         ALT.yr=if_else(is.na(ALT.yr),ALT,ALT.yr),
+         STAse.yr = if_else(is.na(STAse.yr),STAse,STAse.yr),
+         ALTse.yr = if_else(is.na(ALTse.yr),ALTse,ALTse.yr))
+
+
+
+
+
+
+```
+
+## General Dataframe and HDF Human df (combining teacher and general data)
+### Removing OVERALL ITEMS and irrelevant SEGMENTS
+
+```{r}
+
+
+## general dataframe that adds class level components
+
+gdf <- rdf |>
+
+  mutate(across(NCTETID:CHAPNUM,as.numeric))  |> 
+  left_join(classes ,
+            by = c("NCTETID","SCHOOLYEAR_SP","id_year"))
+
+
+n_human_raters <- gdf$RATERID |> n_distinct()
+## Get the testing dataset only tgdf = teacher/testing general dataframe 
+hdf <- gdf |> 
+  mutate(rtype = 0, #ifelse(RATERID <=n_human_raters,0,1), 
+         FRAMEWORK = ifelse(ITEM %in% all_MQI,1,2),
+         NCTETID = as_factor(NCTETID),
+         SCALE = ifelse(ITEM %in% MQI_items,3,7)) |> 
+  filter(ITEM %in% c(all_items,all_obs_items)) |> #, SEGMENT==2
+  # drop_na() %>%
+  full_join(teachers |> 
+              select(-DISTRICT) 
+            # |> mutate(
+         # DISTRICT = as.numeric(DISTRICT),
+         # NCTETID = as.numeric(NCTETID))
+         ,by = c("NCTETID")) |> 
+  mutate(MONTH = ifelse(OBSMONTH > 7, OBSMONTH -7,OBSMONTH+5),
+         EXPERIENCE = (as.numeric(SCHOOLYEAR_SP)-(2010 + as.numeric(SURVEYYEAR_SP)))+as.numeric(EXPERIENCE),
+         TIMING = case_when(OBSMONTH %in% c(6,7) ~ "SUMMER",
+                            # OBSMONTH == 5 ~ "DURING",
+                            OBSMONTH %in% c(3,4,5) ~ "SPRING",
+                            OBSMONTH %in% c(8,9,10,11) ~ "FALL", 
+                            # OBSMONTH %in% c(12) ~ "HOLIDAY",
+                            T ~ "WINTER") |> 
+           as_factor(), 
+         ) |> 
+  as_tibble() |> 
+  mutate( MTYPE = 'human', MODEL = 'human') |> 
+  left_join(df7 |> mutate(NCTETID = as_factor(NCTETID)) |> ## including year level matknowledge
+                          select(NCTETID,SCHOOLYEAR_SP,MATH_KNOWLEDGE:MATH_KNOWLEDGE_SE_YR),
+                        by = c("NCTETID","SCHOOLYEAR_SP")) |>
+  mutate(MATH_KNOWLEDGE_YR = if_else(is.na(MATH_KNOWLEDGE_YR), 
+                                     MATH_KNOWLEDGE, 
+                                     MATH_KNOWLEDGE_YR),
+        MATH_KNOWLEDGE_SE_YR = if_else(is.na(MATH_KNOWLEDGE_YR), 
+                                     MATH_KNOWLEDGE_SE, 
+                                     MATH_KNOWLEDGE_SE_YR)) |> 
+  left_join(df8 |> 
+              mutate(NCTETID = as_factor(NCTETID)) |>
+              select(NCTETID,SCHOOLYEAR_SP,ACCURACY,KOSM,ACCURACY_YR,KOSM_YR),
+                        by = c("NCTETID","SCHOOLYEAR_SP")) |>
+  mutate(ACCURACY_YR = if_else(is.na(ACCURACY_YR), 
+                                     ACCURACY, 
+                                     ACCURACY_YR), 
+         KOSM_YR = if_else(is.na(KOSM_YR), 
+                                 KOSM, 
+                                 KOSM_YR), 
+         FACTOR = get_factor(ITEM),
+         DOMAIN = get_mqi_domain(ITEM),
+         SCORE = if_else(ITEM=="CLNC",8-SCORE,SCORE))## Assign factors according to Blazar and Kraft (2017)
+
+
+
+```
+
+
